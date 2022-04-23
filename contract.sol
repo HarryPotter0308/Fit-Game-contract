@@ -9,29 +9,33 @@ contract GAME is ERC721, Ownable {
 
     uint public constant MAX_SUPPLY = 7000;
     uint public Price = 0.1 ether;
-    mapping(uint => uint256) private _CurrentTotalSupply;
+    mapping(uint => uint) private _CurrentTotalSupply;
 
     address private _DevAddress;
-    uint256 private _DevBalance;
+    uint private _DevBalance;
     string private _MetaURI;
 
     struct MintHistory {
         address minter;
-        uint256 tokenId;
+        uint tokenId;
     }
 
     mapping(uint => address[]) private _Winners;
 
     mapping(uint => MintHistory[]) private _Minted;
 
-    mapping(uint256 => uint256) private _Rewards;
+    mapping(uint => uint) private _Rewards;
+
+    event Minted(address indexed minter, uint price, uint tokenId);
+    event Claimed(address sender, uint tokenId, string tokenUri);
+
 
     modifier _isOwner(address _oAddress) {
         require(owner() == _oAddress, "An error occurred in the verson setting");
         _;
     }
 
-    modifier _versionLimit(uint256 _index) {
+    modifier _versionLimit(uint _index) {
         require(
             _index == 1 || _index == 2 || _index == 3,
             "An error occurred in the verson setting"
@@ -39,100 +43,117 @@ contract GAME is ERC721, Ownable {
         _;
     }
 
-    constructor(uint256 _price, string memory _baseURI) ERC721("Fit In NFT", "FIT") {
-        Price = _price;
-        _MetaURI = _baseURI;
+    constructor(string memory baseURI_) ERC721("Fit In NFT", "FIT") {
+        setBaseURI(baseURI_);
     }
 
-    function setPrice(uint256 _price) public onlyOwner {
+    function setPrice(uint _price) public onlyOwner {
         Price = _price;
     }
 
-    function baseURI() internal view override returns (string memory) {
+    function _baseURI() internal view override returns (string memory) {
         return _MetaURI;
     }
 
-    function setBaseURI(string memory _baseURI) public onlyOwner {
-        _MetaURI = _baseURI;
+    function setBaseURI(string memory baseURI_) public onlyOwner {
+        _MetaURI = baseURI_;
     }
 
-    function tokenURI(uint256 _tokenId) public override {
-        require(_tokenId > 0, "TokenID is invaliable");
-
-        if (_tokenId <= 1000) return string(abi.encodePacked(super.tokenURI(), ".json"));
-        else if (1000 < _tokenId && _tokenId < 5000) return string(abi.encodePacked(super.tokenURI(), ".json"));
-        else return string(abi.encodePacked(super.tokenURI(), ".json"));
+    function tokenURI(uint tokenId_) public view virtual override returns (string memory) {
+        require(tokenId_ > 0, "TokenID is invaliable");
+        if (tokenId_ <= 1000) return string(abi.encodePacked(super.tokenURI(tokenId_), ".json"));
+        else if (1000 < tokenId_ && tokenId_ < 5000) return string(abi.encodePacked(super.tokenURI(tokenId_), ".json"));
+        else return string(abi.encodePacked(super.tokenURI(tokenId_), ".json"));
     }
 
-    function setWinners(uint256 version, uint256[] memory winners)
+    function setWinners(uint version, address[] memory winners_)
         public
         onlyOwner
         _versionLimit(version)
     {
-        require(winners[0], "Winners must always exist");
+        require(winners_.length > 0, "Winners must always exist");
 
-        uint256 index = 0;
-        _Winners[version] = [];
-        while (winners[index]) {
-            _Winners[version][index] = winners[index];
-        }
+        _Winners[version] = winners_;
     }
 
-    function mint(uint256 _version)
+    function mint(uint _version)
         public
         payable
         _versionLimit(_version)
     {
+
+        require (!(_version == 1 && _CurrentTotalSupply[1] == 1000), "V1 token can't be minted anymore.");
+        require (!(_version == 2 && _CurrentTotalSupply[1] < 1000), "All v1 tokens must be minted before v2 tokens can be minted.");
+        require (!(_version == 2 && _CurrentTotalSupply[2] == 5000), "V1 token can't be minted anymore");
+        require (!(_version == 3 && _CurrentTotalSupply[1] == 1000 && _CurrentTotalSupply[2] == 5000), "All v1 tokens and v2 tokens must be minted before v3 tokens can be minted.");
+        require (!(_version == 3 && _CurrentTotalSupply[1] == 1000 && _CurrentTotalSupply[2] == 5000 && _CurrentTotalSupply[3] == 1000), "The token can't mint anymore.");
         require(msg.value >= Price, "Price is too low");
-        uint256 _tokenId = totalSupply() + 1;
+
+        uint _tokenId = _CurrentTotalSupply[_version] + 1;
         
-        _Minted[_version][_Minted[_version].length].tokenID = _tokenId;
+        _Minted[_version][_Minted[_version].length].tokenId = _tokenId;
         _Minted[_version][_Minted[_version].length].minter = msg.sender;
         _safeMint(msg.sender, _tokenId);
 
         if (_version == 1) {
-            _Rewards[1] += Price * 0.8;
-            _Rewards[2] += Price * 0.1;
-            _DevBalance += Price * 0.1;
+            _Rewards[1] += Price * 8 / 10;
+            _Rewards[2] += Price * 1 / 10;
+            _DevBalance += Price * 1 / 10;
+            _CurrentTotalSupply[1] ++;
         } else if (_version == 2) {
-            _Rewards[2] += Price * 0.8;
-            _Rewards[3] += Price * 0.1;
-            _DevBalance += Price * 0.1;
+            _Rewards[2] += Price * 8 / 10;
+            _Rewards[3] += Price * 1 / 10;
+            _DevBalance += Price * 1 / 10;
+            _CurrentTotalSupply[2] ++;
         } else {
-            _Rewards[3] += Price * 0.8;
-            _DevBalance += Price * 0.2;
+            _Rewards[3] += Price * 8 / 10;
+            _DevBalance += Price * 2 / 10;
+            _CurrentTotalSupply[3] ++;
         }
+
+        emit Minted(msg.sender, Price, _tokenId);
     }
 
     function distributeRewardsToWinners() public {
-        uint256 index = 0;
+        uint index = 0;
 
-        payable(address(this)).transfer(_DevAddress, _DevBalance);
+        payable(_DevAddress).transfer(_DevBalance);
 
-        while(_Minted[1][index].minter) {
-            payable(address(this)).transfer(_Minted[1][index].minter, _Rewards[1] / _Minted[1].length);
+        while(_Minted[1].length > index) {
+            payable(_Minted[1][index].minter).transfer(_Rewards[1] / _Minted[1].length);
             index ++;
         }
         index = 0;
-        while(_Minted[2][index].minter) {
-            payable(address(this)).transfer(_Minted[2][index].minter, _Rewards[2] / _Minted[2].length);
+        while(_Minted[2].length > index) {
+            payable(_Minted[2][index].minter).transfer(_Rewards[2] / _Minted[2].length);
             index ++;
         }
         index = 0;
-        while(_Minted[3][index].minter) {
-            payable(address(this)).transfer(_Minted[3][index].minter, _Rewards[3] / _Minted[3].length);
+        while(_Minted[3].length > index) {
+            payable(_Minted[3][index].minter).transfer(_Rewards[3] / _Minted[3].length);
             index ++;
         }
     }
 
     function claim() public {
-        uint256 index = 0;
-        uint256 _tokenId;
-        while (_Minted[1][index].minter) {
-            if (msg.sender == _Minted[1][index ++].minter) {
-                _tokenId = totalSupply() + 1;
-                _safeMint(msg.sender, _tokenId);
+        uint index = 0;
+        uint tokenId_ = 0;
+        while (_Minted[1][index].tokenId > 0) {
+            if (msg.sender == _Minted[1][index].minter) {
+
+                tokenId_ = ++ _CurrentTotalSupply[2];
+                _safeMint(msg.sender, tokenId_);
+                
+                _Minted[2][_Minted[2].length].tokenId = tokenId_;
+                _Minted[2][_Minted[2].length].minter = msg.sender;
+
+                tokenId_ = _Minted[1].length - 1;
+                _Minted[1][index].minter = _Minted[1][tokenId_].minter;
+                _Minted[1][index].tokenId = _Minted[1][tokenId_].tokenId;
+                _Minted[1].pop();
+                index --;
             }
+            index ++;
         }
     }
 }
